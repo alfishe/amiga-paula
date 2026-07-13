@@ -99,8 +99,8 @@ void Replayer::play() {
 
 void Replayer::stop() {
     playing = false;
-    if (paula) {
-        paula->writeWord(0xDFF096, 0x000F);
+    if (renderer) {
+        renderer->writeWord(0xDFF096, 0x000F);
     }
 }
 
@@ -129,7 +129,7 @@ void Replayer::tick() {
                 playVoice(i);
 
                 uint32_t addr = 0xDFF0A0 + (i * 16);
-                paula->writeWord(addr + 8, channels[i].volume);
+                renderer->writeWord(addr + 8, channels[i].volume);
             }
 
             setDMA();
@@ -190,7 +190,7 @@ void Replayer::playVoice(int ch) {
     // If no note/command, just update period register (like original PT)
     if (note.period == 0 && note.command == 0 && note.param == 0) {
         uint32_t addr = 0xDFF0A0 + (ch * 16);
-        paula->writeWord(addr + 6, c.period);
+        renderer->writeWord(addr + 6, c.period);
     }
 
     c.note = note.period;
@@ -225,7 +225,7 @@ void Replayer::playVoice(int ch) {
         }
 
         if (c.length == 0) {
-            c.loopStart = c.waveStart = paula->getNullSamplePtr();
+            c.loopStart = c.waveStart = renderer->getNullSamplePtr();
             c.replen = 1;
         }
     }
@@ -263,22 +263,22 @@ void Replayer::setPeriod(int ch) {
     c.period = periodTable[(c.finetune * 37) + i];
 
     if ((c.cmd & 0xFF0) != 0xED0) {
-        paula->writeWord(0xDFF096, c.dmaBit);
+        renderer->writeWord(0xDFF096, c.dmaBit);
 
         if ((c.waveControl & 0x04) == 0) c.vibratoPos = 0;
         if ((c.waveControl & 0x40) == 0) c.tremoloPos = 0;
 
         uint32_t addr = 0xDFF0A0 + (ch * 16);
-        paula->writeWord(addr + 4, c.length);
-        paula->writePtr(addr, c.sampleStart);
+        renderer->writeWord(addr + 4, c.length);
+        renderer->writePtr(addr, c.sampleStart);
 
         if (!c.sampleStart) {
             c.loopStart = nullptr;
-            paula->writeWord(addr + 4, 1);
+            renderer->writeWord(addr + 4, 1);
             c.replen = 1;
         }
 
-        paula->writeWord(addr + 6, c.period);
+        renderer->writeWord(addr + 6, c.period);
         dmaCon |= c.dmaBit;
     }
 
@@ -299,7 +299,7 @@ void Replayer::checkMoreEffects(int ch) {
     }
 
     uint32_t addr = 0xDFF0A0 + (ch * 16);
-    paula->writeWord(addr + 6, c.period);
+    renderer->writeWord(addr + 6, c.period);
 }
 
 void Replayer::checkEffects(int ch) {
@@ -322,7 +322,7 @@ void Replayer::checkEffects(int ch) {
     }
 
     uint32_t addr = 0xDFF0A0 + (ch * 16);
-    paula->writeWord(addr + 6, c.period);
+    renderer->writeWord(addr + 6, c.period);
 
     if (cmd == 0x7) {
         tremolo(ch);
@@ -331,17 +331,17 @@ void Replayer::checkEffects(int ch) {
 
     if (cmd == 0xA) volumeSlide(ch);
 
-    paula->writeWord(addr + 8, c.volume);
+    renderer->writeWord(addr + 8, c.volume);
 }
 
 void Replayer::setDMA() {
-    paula->writeWord(0xDFF096, 0x8000 | dmaCon);
+    renderer->writeWord(0xDFF096, 0x8000 | dmaCon);
 
     for (int i = 0; i < NUM_CHANNELS; i++) {
         auto& c = channels[i];
         uint32_t addr = 0xDFF0A0 + (i * 16);
-        paula->writePtr(addr, c.loopStart);
-        paula->writeWord(addr + 4, c.replen);
+        renderer->writePtr(addr, c.loopStart);
+        renderer->writeWord(addr + 4, c.replen);
     }
 }
 
@@ -353,14 +353,14 @@ void Replayer::arpeggio(int ch) {
     if (arpTick == 1) arpNote = c.cmd >> 4;
     else if (arpTick == 2) arpNote = c.cmd & 0xF;
     else {
-        paula->writeWord(0xDFF0A0 + (ch * 16) + 6, c.period);
+        renderer->writeWord(0xDFF0A0 + (ch * 16) + 6, c.period);
         return;
     }
 
     const int16_t* periods = &periodTable[c.finetune * 37];
     for (int i = 0; i < 37; i++) {
         if (c.period >= periods[i]) {
-            paula->writeWord(0xDFF0A0 + (ch * 16) + 6, periods[i + arpNote]);
+            renderer->writeWord(0xDFF0A0 + (ch * 16) + 6, periods[i + arpNote]);
             break;
         }
     }
@@ -374,7 +374,7 @@ void Replayer::portaUp(int ch) {
     if ((c.period & 0xFFF) < 113)
         c.period = (c.period & 0xF000) | 113;
 
-    paula->writeWord(0xDFF0A0 + (ch * 16) + 6, c.period & 0xFFF);
+    renderer->writeWord(0xDFF0A0 + (ch * 16) + 6, c.period & 0xFFF);
 }
 
 void Replayer::portaDown(int ch) {
@@ -385,7 +385,7 @@ void Replayer::portaDown(int ch) {
     if ((c.period & 0xFFF) > 856)
         c.period = (c.period & 0xF000) | 856;
 
-    paula->writeWord(0xDFF0A0 + (ch * 16) + 6, c.period & 0xFFF);
+    renderer->writeWord(0xDFF0A0 + (ch * 16) + 6, c.period & 0xFFF);
 }
 
 void Replayer::setTonePorta(int ch) {
@@ -428,7 +428,7 @@ void Replayer::tonePortNoChange(int ch) {
 
     uint32_t addr = 0xDFF0A0 + (ch * 16);
     if ((c.glissFunk & 0xF) == 0) {
-        paula->writeWord(addr + 6, c.period);
+        renderer->writeWord(addr + 6, c.period);
     } else {
         const int16_t* porta = &periodTable[c.finetune * 37];
         int i = 0;
@@ -436,7 +436,7 @@ void Replayer::tonePortNoChange(int ch) {
             if (c.period >= porta[i]) break;
             if (++i >= 37) { i = 35; break; }
         }
-        paula->writeWord(addr + 6, porta[i]);
+        renderer->writeWord(addr + 6, porta[i]);
     }
 }
 
@@ -465,7 +465,7 @@ void Replayer::vibrato2(int ch) {
     if (c.vibratoPos < 128) data = c.period + data;
     else data = c.period - data;
 
-    paula->writeWord(0xDFF0A0 + (ch * 16) + 6, data);
+    renderer->writeWord(0xDFF0A0 + (ch * 16) + 6, data);
     c.vibratoPos += (c.vibratoCmd >> 2) & 0x3C;
 }
 
@@ -504,7 +504,7 @@ void Replayer::tremolo(int ch) {
         if (data < 0) data = 0;
     }
 
-    paula->writeWord(0xDFF0A0 + (ch * 16) + 8, data);
+    renderer->writeWord(0xDFF0A0 + (ch * 16) + 8, data);
     c.tremoloPos += (c.tremoloCmd >> 2) & 0x3C;
 }
 
@@ -571,7 +571,7 @@ void Replayer::eCommands(int ch) {
 
     switch (ecmd) {
         case 0x0:
-            paula->writeByte(0xBFE001, ((c.cmd & 1) ^ 1) << 1);
+            renderer->writeByte(0xBFE001, ((c.cmd & 1) ^ 1) << 1);
             break;
         case 0x1: finePortaUp(ch); break;
         case 0x2: finePortaDown(ch); break;
@@ -640,13 +640,13 @@ void Replayer::doRetrg(int ch) {
     auto& c = channels[ch];
     uint32_t addr = 0xDFF0A0 + (ch * 16);
 
-    paula->writeWord(0xDFF096, c.dmaBit);
-    paula->writePtr(addr, c.sampleStart);
-    paula->writeWord(addr + 4, c.length);
-    paula->writeWord(addr + 6, c.period);
-    paula->writeWord(0xDFF096, 0x8000 | c.dmaBit);
-    paula->writePtr(addr, c.loopStart);
-    paula->writeWord(addr + 4, c.replen);
+    renderer->writeWord(0xDFF096, c.dmaBit);
+    renderer->writePtr(addr, c.sampleStart);
+    renderer->writeWord(addr + 4, c.length);
+    renderer->writeWord(addr + 6, c.period);
+    renderer->writeWord(0xDFF096, 0x8000 | c.dmaBit);
+    renderer->writePtr(addr, c.loopStart);
+    renderer->writeWord(addr + 4, c.replen);
 }
 
 void Replayer::retrigNote(int ch) {

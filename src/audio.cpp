@@ -83,12 +83,19 @@ void Audio::pause() {
     }
 }
 
+void Audio::setRenderer(IRenderer* r) {
+    std::lock_guard<std::mutex> lock(rendererMutex);
+    renderer = r;
+}
+
 void Audio::audioCallback(void* userdata, Uint8* stream, int len) {
     auto* audio = static_cast<Audio*>(userdata);
     audio->generateAudio(reinterpret_cast<int16_t*>(stream), len / 4);
 }
 
 void Audio::generateAudio(int16_t* stream, int numSamples) {
+    std::lock_guard<std::mutex> lock(rendererMutex);
+
     int samplesLeft = numSamples;
     int16_t* out = stream;
 
@@ -117,8 +124,8 @@ void Audio::generateAudio(int16_t* stream, int numSamples) {
         if (tickSampleCounter > 0 && samplesToMix > tickSampleCounter)
             samplesToMix = tickSampleCounter;
 
-        if (paula) {
-            paula->generateSamples(mixBufferL.data(), mixBufferR.data(), samplesToMix);
+        if (renderer) {
+            renderer->generateSamples(mixBufferL.data(), mixBufferR.data(), samplesToMix);
         } else {
             std::memset(mixBufferL.data(), 0, samplesToMix * sizeof(float));
             std::memset(mixBufferR.data(), 0, samplesToMix * sizeof(float));

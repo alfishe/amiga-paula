@@ -4,7 +4,8 @@
 #include <vector>
 #include <memory>
 #include <atomic>
-#include "paula.hpp"
+#include <mutex>
+#include "renderer.hpp"
 #include "replayer.hpp"
 
 namespace mod {
@@ -18,7 +19,8 @@ public:
     void close();
 
     void setReplayer(Replayer* r) { replayer = r; }
-    void setPaula(Paula* p) { paula = p; }
+    void setRenderer(IRenderer* r);
+    IRenderer* getRenderer() const { return renderer; }
 
     void start();
     void pause();
@@ -33,7 +35,8 @@ private:
     int outputRate = 48000;
 
     Replayer* replayer = nullptr;
-    Paula* paula = nullptr;
+    IRenderer* renderer = nullptr;
+    std::mutex rendererMutex;
 
     std::vector<float> mixBufferL;
     std::vector<float> mixBufferR;

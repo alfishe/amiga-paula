@@ -12,6 +12,7 @@ add_executable(modplayer
     src/mod_loader.cpp
     src/replayer.cpp
     src/paula.cpp
+    src/pwm_paula.cpp
     src/audio.cpp
     src/filters.cpp
 )

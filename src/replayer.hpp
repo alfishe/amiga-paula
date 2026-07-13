@@ -2,7 +2,7 @@
 
 #include <memory>
 #include "types.hpp"
-#include "paula.hpp"
+#include "renderer.hpp"
 
 namespace mod {
 
@@ -18,7 +18,7 @@ public:
     void tick();
     double ciaBpm2Hz(int bpm) const;
 
-    void setPaula(Paula* p) { paula = p; }
+    void setRenderer(IRenderer* r) { renderer = r; }
 
     int getBPM() const { return bpm; }
     int getSpeed() const { return speed; }
@@ -66,7 +66,7 @@ private:
     void updateFunk(int ch);
 
     Module* module = nullptr;
-    Paula* paula = nullptr;
+    IRenderer* renderer = nullptr;
     std::array<Channel, NUM_CHANNELS> channels;
 
     bool playing = false;
