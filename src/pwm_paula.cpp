@@ -244,27 +244,11 @@ void PwmPaula::generateSamples(float* outL, float* outR, int32_t numSamples) {
             countR++;
         }
 
-        // Average and normalize
+        // Average and normalize - no FIR, averaging provides sufficient anti-alias
         float outSampleL = (countL > 0) ? (accumL / countL) / 128.0f : 0.0f;
         float outSampleR = (countR > 0) ? (accumR / countR) / 128.0f : 0.0f;
 
-        // Apply FIR lowpass for anti-aliasing
-        firHistory[0][firHistoryIdx[0]] = outSampleL;
-        firHistory[1][firHistoryIdx[1]] = outSampleR;
-
-        float filteredL = 0.0f, filteredR = 0.0f;
-        int idx = firHistoryIdx[0];
-        for (int t = 0; t < FIR_TAPS; t++) {
-            filteredL += firHistory[0][idx] * firCoeffs[t];
-            filteredR += firHistory[1][idx] * firCoeffs[t];
-            if (--idx < 0) idx = FIR_TAPS - 1;
-        }
-
-        firHistoryIdx[0] = (firHistoryIdx[0] + 1) % FIR_TAPS;
-        firHistoryIdx[1] = (firHistoryIdx[1] + 1) % FIR_TAPS;
-
-        // Apply analog filters
-        float out[2] = {filteredL, filteredR};
+        float out[2] = {outSampleL, outSampleR};
 
         if (useLEDFilter)
             filterLED.lowPassStereo(out, out);
