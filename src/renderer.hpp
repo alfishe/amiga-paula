@@ -5,8 +5,9 @@
 namespace mod {
 
 enum class RendererType {
-    BLEP,   // Original BLEP synthesis (fast, accurate)
-    PWM     // PWM clock simulation with polyphase FIR decimation (authentic)
+    BLEP,    // Original BLEP synthesis (fast, accurate)
+    PWM,     // PWM clock simulation with polyphase FIR decimation (authentic)
+    WINUAE   // WinUAE/UADE sinc interpolation with Lankila's filter model
 };
 
 class IRenderer {

@@ -23,12 +23,13 @@ void PwmPaula::initDecimator(double freq) {
     decimationStep = PWM_CLOCK_HZ / freq;
     decimationPhase = 0.0;
 
-    // Design lowpass FIR filter for anti-aliasing
-    // Cutoff at Nyquist of output rate, with transition band
-    double cutoffNorm = 0.45 / decimationFactor;  // Normalized cutoff
+    // Design lowpass FIR filter for post-decimation smoothing
+    // Cutoff near output Nyquist to preserve full audio bandwidth
+    // A1200 has no significant lowpass (34kHz is above audible range)
+    double cutoffNorm = 0.48;  // Very close to Nyquist - preserve all audio
 
     // Kaiser window FIR design
-    double beta = 5.0;  // Controls stopband attenuation (~50dB)
+    double beta = 2.5;  // Lower beta = wider transition band, less ringing
 
     auto bessel_i0 = [](double x) -> double {
         double sum = 1.0;

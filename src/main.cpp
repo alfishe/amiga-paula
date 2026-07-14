@@ -5,6 +5,9 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include <SDL2/SDL.h>
 
@@ -13,9 +16,31 @@
 #include "replayer.hpp"
 #include "paula.hpp"
 #include "pwm_paula.hpp"
+#include "winuae_paula.hpp"
 #include "audio.hpp"
 
 std::atomic<bool> running{true};
+struct termios origTermios;
+bool termiosSet = false;
+
+void disableRawMode() {
+    if (termiosSet) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &origTermios);
+        termiosSet = false;
+    }
+}
+
+void enableRawMode() {
+    tcgetattr(STDIN_FILENO, &origTermios);
+    termiosSet = true;
+    atexit(disableRawMode);
+
+    struct termios raw = origTermios;
+    raw.c_lflag &= ~(ECHO | ICANON);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+}
 
 void signalHandler(int) {
     running = false;
@@ -25,8 +50,9 @@ void printUsage(const char* progName) {
     std::cout << "Usage: " << progName << " <modfile.mod>\n";
     std::cout << "\nConsole MOD player with Amiga emulation\n";
     std::cout << "\nRenderers:\n";
-    std::cout << "  BLEP - Band-limited step synthesis (fast, accurate)\n";
-    std::cout << "  PWM  - PWM clock simulation ~3.55MHz + FIR decimation (authentic)\n";
+    std::cout << "  BLEP   - Band-limited step synthesis (fast, accurate)\n";
+    std::cout << "  PWM    - PWM clock simulation ~3.55MHz + FIR decimation (authentic)\n";
+    std::cout << "  WinUAE - Lankila's sinc interpolation + filter model (WinUAE/UADE)\n";
     std::cout << "\nControls:\n";
     std::cout << "  Left/Right arrow - Switch renderer\n";
     std::cout << "  Q or Ctrl+C      - Quit\n";
@@ -56,6 +82,7 @@ int main(int argc, char* argv[]) {
 
     mod::Paula blepPaula;
     mod::PwmPaula pwmPaula;
+    mod::WinuaePaula winuaePaula;
     mod::Replayer replayer;
     mod::Audio audio;
 
@@ -67,6 +94,7 @@ int main(int argc, char* argv[]) {
     int sampleRate = audio.getSampleRate();
     blepPaula.setup(sampleRate, mod::MODEL_A1200);
     pwmPaula.setup(sampleRate);
+    winuaePaula.setup(sampleRate, mod::WinuaePaula::FILTER_MODEL_A1200);
 
     // Start with BLEP renderer
     mod::IRenderer* currentRenderer = &blepPaula;
@@ -86,38 +114,51 @@ int main(int argc, char* argv[]) {
     std::cout << "Renderer: BLEP (use Left/Right arrows to switch)\n";
     std::cout << "\nPress 'q' or Ctrl+C to stop...\n\n";
 
-    const char* rendererNames[] = {"BLEP", "PWM "};
+    enableRawMode();
+
+    constexpr int NUM_RENDERERS = 3;
+    const char* rendererNames[] = {"BLEP  ", "PWM   ", "WinUAE"};
+    mod::IRenderer* renderers[] = { &blepPaula, &pwmPaula, &winuaePaula };
+    int currentIdx = 0;
+
+    auto switchRenderer = [&](int newIdx) {
+        currentIdx = newIdx;
+        currentType = static_cast<mod::RendererType>(newIdx);
+        currentRenderer = renderers[newIdx];
+        replayer.setRenderer(currentRenderer);
+        audio.setRenderer(currentRenderer);
+
+        const char* desc[] = {
+            "BLEP (band-limited synthesis)",
+            "PWM (3.55MHz + FIR decimation)",
+            "WinUAE (Lankila sinc + filter model)"
+        };
+        std::cout << "\n>>> " << desc[newIdx] << " <<<\n";
+    };
 
     while (running && replayer.isPlaying()) {
-        // Poll SDL events for keyboard input
-        SDL_Event event;
-        while (SDL_PollEvent(&event)) {
-            if (event.type == SDL_QUIT) {
-                running = false;
-            } else if (event.type == SDL_KEYDOWN) {
-                switch (event.key.keysym.sym) {
-                    case SDLK_LEFT:
-                        if (currentType != mod::RendererType::BLEP) {
-                            currentType = mod::RendererType::BLEP;
-                            currentRenderer = &blepPaula;
-                            replayer.setRenderer(currentRenderer);
-                            audio.setRenderer(currentRenderer);
-                            std::cout << "\n>>> Switched to BLEP renderer <<<\n";
+        // Read keyboard input from stdin (raw mode)
+        char c;
+        while (read(STDIN_FILENO, &c, 1) == 1) {
+            if (c == 'q' || c == 'Q' || c == 27) {  // q, Q, or ESC
+                // Check for escape sequence (arrow keys)
+                if (c == 27) {
+                    char seq[2];
+                    if (read(STDIN_FILENO, &seq[0], 1) == 1 && seq[0] == '[') {
+                        if (read(STDIN_FILENO, &seq[1], 1) == 1) {
+                            if (seq[1] == 'D') {  // Left arrow
+                                switchRenderer((currentIdx - 1 + NUM_RENDERERS) % NUM_RENDERERS);
+                                continue;
+                            } else if (seq[1] == 'C') {  // Right arrow
+                                switchRenderer((currentIdx + 1) % NUM_RENDERERS);
+                                continue;
+                            }
                         }
-                        break;
-                    case SDLK_RIGHT:
-                        if (currentType != mod::RendererType::PWM) {
-                            currentType = mod::RendererType::PWM;
-                            currentRenderer = &pwmPaula;
-                            replayer.setRenderer(currentRenderer);
-                            audio.setRenderer(currentRenderer);
-                            std::cout << "\n>>> Switched to PWM renderer (3.55MHz + FIR) <<<\n";
-                        }
-                        break;
-                    case SDLK_q:
-                    case SDLK_ESCAPE:
-                        running = false;
-                        break;
+                    }
+                    // Just ESC pressed alone - quit
+                    running = false;
+                } else {
+                    running = false;
                 }
             }
         }
@@ -134,6 +175,7 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
+    disableRawMode();
     std::cout << "\n\nStopping playback...\n";
 
     audio.pause();
