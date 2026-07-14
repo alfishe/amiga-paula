@@ -5,11 +5,15 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+
+#ifdef _WIN32
+#include <conio.h>
+#include <SDL.h>
+#else
 #include <termios.h>
 #include <unistd.h>
-#include <fcntl.h>
-
 #include <SDL2/SDL.h>
+#endif
 
 #include "types.hpp"
 #include "mod_loader.hpp"
@@ -20,6 +24,24 @@
 #include "audio.hpp"
 
 std::atomic<bool> running{true};
+
+#ifdef _WIN32
+void enableRawMode() {}
+void disableRawMode() {}
+
+int readKey() {
+    if (_kbhit()) {
+        int ch = _getch();
+        if (ch == 0 || ch == 224) {
+            ch = _getch();
+            if (ch == 75) return -1;  // Left arrow
+            if (ch == 77) return -2;  // Right arrow
+        }
+        return ch;
+    }
+    return 0;
+}
+#else
 struct termios origTermios;
 bool termiosSet = false;
 
@@ -41,6 +63,25 @@ void enableRawMode() {
     raw.c_cc[VTIME] = 0;
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
+
+int readKey() {
+    char c;
+    if (read(STDIN_FILENO, &c, 1) == 1) {
+        if (c == 27) {
+            char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) == 1 && seq[0] == '[') {
+                if (read(STDIN_FILENO, &seq[1], 1) == 1) {
+                    if (seq[1] == 'D') return -1;  // Left arrow
+                    if (seq[1] == 'C') return -2;  // Right arrow
+                }
+            }
+            return 27;  // ESC
+        }
+        return c;
+    }
+    return 0;
+}
+#endif
 
 void signalHandler(int) {
     running = false;
@@ -67,7 +108,9 @@ int main(int argc, char* argv[]) {
     std::string filename = argv[1];
 
     std::signal(SIGINT, signalHandler);
+#ifndef _WIN32
     std::signal(SIGTERM, signalHandler);
+#endif
 
     auto module = mod::loadMod(filename);
     if (!module) {
@@ -137,30 +180,13 @@ int main(int argc, char* argv[]) {
     };
 
     while (running && replayer.isPlaying()) {
-        // Read keyboard input from stdin (raw mode)
-        char c;
-        while (read(STDIN_FILENO, &c, 1) == 1) {
-            if (c == 'q' || c == 'Q' || c == 27) {  // q, Q, or ESC
-                // Check for escape sequence (arrow keys)
-                if (c == 27) {
-                    char seq[2];
-                    if (read(STDIN_FILENO, &seq[0], 1) == 1 && seq[0] == '[') {
-                        if (read(STDIN_FILENO, &seq[1], 1) == 1) {
-                            if (seq[1] == 'D') {  // Left arrow
-                                switchRenderer((currentIdx - 1 + NUM_RENDERERS) % NUM_RENDERERS);
-                                continue;
-                            } else if (seq[1] == 'C') {  // Right arrow
-                                switchRenderer((currentIdx + 1) % NUM_RENDERERS);
-                                continue;
-                            }
-                        }
-                    }
-                    // Just ESC pressed alone - quit
-                    running = false;
-                } else {
-                    running = false;
-                }
-            }
+        int key = readKey();
+        if (key == 'q' || key == 'Q' || key == 27) {
+            running = false;
+        } else if (key == -1) {  // Left arrow
+            switchRenderer((currentIdx - 1 + NUM_RENDERERS) % NUM_RENDERERS);
+        } else if (key == -2) {  // Right arrow
+            switchRenderer((currentIdx + 1) % NUM_RENDERERS);
         }
 
         std::cout << "\r[" << rendererNames[static_cast<int>(currentType)] << "] "

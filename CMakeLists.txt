@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(SDL2 REQUIRED)
+find_package(SDL2 REQUIRED CONFIG)
 
 add_executable(modplayer
     src/main.cpp
@@ -19,14 +19,14 @@ add_executable(modplayer
     src/filters.cpp
 )
 
-target_include_directories(modplayer PRIVATE
-    ${SDL2_INCLUDE_DIRS}
-    src
-)
+target_include_directories(modplayer PRIVATE src)
 
-target_link_libraries(modplayer PRIVATE
-    ${SDL2_LIBRARIES}
-)
+if(TARGET SDL2::SDL2)
+    target_link_libraries(modplayer PRIVATE SDL2::SDL2 SDL2::SDL2main)
+else()
+    target_include_directories(modplayer PRIVATE ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(modplayer PRIVATE ${SDL2_LIBRARIES})
+endif()
 
 if(APPLE)
     target_link_libraries(modplayer PRIVATE "-framework AudioToolbox")
