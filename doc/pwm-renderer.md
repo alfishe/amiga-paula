@@ -2,87 +2,105 @@
 
 ## Overview
 
-The PWM renderer simulates Paula's audio subsystem at the native DMA clock rate (~3.546895 MHz PAL). Unlike band-limited approaches, it runs the actual timing loop and decimates to the output sample rate using averaging.
+The PWM renderer simulates Paula's audio subsystem at the native DMA clock rate (~3.546895 MHz PAL). Unlike band-limited approaches, it runs the actual timing loop and decimates to the output sample rate.
 
 ## Signal Chain
 
 ```
-Paula DMA @ 3.55MHz → Per-channel PWM volume → Stereo sum → Decimation → Analog filters → Punch enhancement → Output
+Paula DMA @ 3.55MHz → Per-channel PWM volume → Stereo sum → CIC decimation → Analog filters → Punch enhancement → Output
 ```
 
 ## Decimation Strategy
 
-### Averaging vs FIR
+### CIC (Boxcar Averaging)
 
-Early experiments used a Kaiser-windowed FIR filter for decimation. While mathematically correct for anti-aliasing, this approach had a critical flaw: **it smeared transients**.
+The decimation uses averaging over ~74 PWM cycles per output sample. This is a **first-order CIC filter** (Cascaded Integrator-Comb), not "no filter":
 
-Measured results with 127-tap FIR:
-- MaxSlew: 37.3k (lower than BLEP's 37.3k)
-- Transients audibly softened
+- Boxcar of length N has sinc frequency response
+- First null at output sample rate (48kHz)
+- Rolloff approximately **-3.9 dB at Nyquist**
+- Natural soft HF attenuation without phase smearing
 
-The final implementation uses simple averaging over the ~74 PWM cycles per output sample. This preserves the step-like character of Paula's DAC output:
+This explains the "sharp but not harsh" character: the CIC passes Paula's useful harmonics while gently attenuating the very top, unlike a brick-wall FIR which would cut more aggressively.
 
-- MaxSlew: 41.8k (sharper than BLEP)
-- HF Energy: 1.18 (between BLEP 1.08 and WinUAE 1.24)
+### Why Not FIR
 
-The averaging itself provides sufficient anti-aliasing because Paula's sample rate (limited by minimum period 113) is well below the decimation ratio.
+Early experiments used a Kaiser-windowed FIR filter (127 taps, cutoff 0.48). Problems:
+- **Smeared transients** - group delay spread the attack energy
+- Cut useful Paula harmonics that the CIC preserves
+- MaxSlew dropped to 37.3k vs CIC's 41.8k
+
+The CIC's gentle rolloff matches real analog anti-alias behavior better than a steep digital filter.
+
+### CIC Artifacts
+
+Note: CIC frequency response has nulls at multiples of output_rate/N. For certain Paula periods that align with these nulls, output may be slightly quieter. This is mathematically expected behavior.
 
 ## Punch Enhancement
 
-### Problem Statement
+**Note: This is sound design, not emulation.** The punch effect adds character beyond what Paula hardware produces. It should be validated against real hardware recordings, not other emulators.
 
-Clean PWM decimation produces accurate but somewhat clinical output. Real Amiga sound has more "energy" - sharper attacks, more presence. Several approaches were tested:
+### What It Actually Is
 
-| Approach | Result |
-|----------|--------|
-| HPF (coupling caps) | Adds punch but introduces phase shift/ringing in bass |
-| Slew limiter | Smooths transients - opposite of desired effect |
-| DAC waveshaper | Adds harmonics but not transient definition |
-| Pure edge enhance | Very energetic but harsh |
-| Pure transient boost | Clean but less energy |
+The "punch" algorithm is a combination of:
 
-### Hybrid Solution: "Punch"
+1. **High-shelf / tilt EQ** - `diff * edgeBlend` adds first difference, which is +6 dB/octave boost
+2. **Upward expander on HF** - envelope-gated transient boost that increases HF content on attacks
 
-The final algorithm combines constant edge enhancement with envelope-gated transient boost:
+This is essentially a **transient designer + exciter**.
+
+### Implementation
 
 ```cpp
-constexpr float edgeBlend = 0.08f;   // Constant edge enhancement
-constexpr float attack = 0.3f;       // Envelope attack speed  
-constexpr float release = 0.998f;    // Envelope release speed
-constexpr float transBoost = 0.2f;   // Transient boost amount
+constexpr float edgeBlend = 0.08f;   // +6 dB/oct tilt amount
+constexpr float attack = 0.3f;       // Envelope attack
+constexpr float release = 0.998f;    // ~11ms @ 48kHz
+constexpr float transBoost = 0.2f;   // Transient expansion amount
 
 float diffL = out[0] - prevOutL;
-float diffR = out[1] - prevOutR;
 
-// Envelope follower on difference magnitude
+// Envelope follower
 float magL = std::abs(diffL);
 envL = (magL > envL) ? magL * attack + envL * (1-attack) : envL * release;
 
-// Edge component (constant)
+// Tilt component (constant +6 dB/oct)
 out[0] += diffL * edgeBlend;
 
-// Transient component (envelope-gated)
+// Transient expansion (envelope-gated)
 out[0] += diffL * envL * transBoost;
 ```
 
-### Parameter Derivation
+### Known Limitations
 
-Parameters were tuned by comparing against WinUAE and optimizing for:
-1. Sharp transients (MaxSlew)
-2. Rich harmonics (HF Energy)
-3. Subjective "punch" without harshness
+1. **Diff boosts to Nyquist** - The first difference has maximum gain at highest frequencies. This boosts 12-20kHz zone where 8-bit quantization noise and hi-hat sizzle live. A future improvement would lowpass the diff through a one-pole at ~10-12kHz to focus the boost in the 2-8kHz presence zone.
 
-Final measurements on test module (tbl-tint_secondpart.mod):
+2. **Release time** - At 0.998 (τ≈11ms @ 48kHz), the envelope barely decays between attacks on dense material. The transient component degenerates into a constant expander, duplicating the edge effect. Longer release (~0.9995, τ≈45ms) with a noise gate would be more selective.
 
-| Renderer | MaxSlew | HF Energy | Character |
-|----------|---------|-----------|-----------|
-| PWM Clean | 41.8k | 1.03 | Accurate but clinical |
-| PWM Edge only | 48.1k | 1.24 | Energetic but harsh |
-| PWM Transient only | 53.5k | 1.21 | Clean attacks |
-| **PWM Punch** | **50.4k** | **1.23** | **Balanced** |
-| WinUAE | 34.0k | 1.07 | Reference |
+3. **No diff clamping** - On extreme sample transitions, `diff * env * transBoost` can spike. Should add soft limiting.
 
-Punch achieves WinUAE-level harmonics (1.23 vs 1.07) while maintaining sharper transients (50.4k vs 34k).
+4. **Metrics are circular** - We measure MaxSlew/HF Energy, but the punch effect directly inflates these metrics. The measurements don't prove accuracy, only that the effect is working.
+
+### Proper Validation
+
+The only valid reference is **line-out recording from real A1200** with:
+- Loudness matched to 0.1 dB
+- Blind A/B comparison
+- Null test (subtract, check residual)
+
+Comparing against WinUAE (which has its own compromises) doesn't establish ground truth.
+
+### Measured Effect
+
+Test module: tbl-tint_secondpart.mod
+
+| Renderer | MaxSlew | Character |
+|----------|---------|-----------|
+| PWM (no punch) | 41.8k | Clean reference |
+| PWM + Punch | 50.4k | +20% transient boost |
+| BLEP | 21.8k | Softer |
+| WinUAE | 20.3k | Softest |
+
+The punch adds ~20% to transient slew rate. Whether this matches real hardware or exceeds it is **unknown without hardware measurement**.
 
 ## Rejected Approaches
 
@@ -94,10 +112,14 @@ Full analog chain modeling was implemented and tested:
 2. **DAC waveshaper** - Static nonlinearity with asymmetric distortion. Subtle effect, not worth complexity.
 3. **Coupling HPF** - Two cascaded HPFs at 7Hz and 15Hz. Created phase tilt in bass - punchy but ringy.
 4. **Output saturation** - Soft/hard clipping. Reduced dynamics without benefit.
-5. **Channel crosstalk** - -46dB bleed with LP filter. Inaudible.
+5. **Channel crosstalk** - -46dB bleed with LP filter. Inaudible (and this is accurate - real Paula crosstalk is at this level).
 6. **Noise floor** - -78dB pink noise. Inaudible.
 
-Conclusion: These effects either degraded quality or were inaudible. The "analog warmth" people remember is largely the LED filter (already modeled) plus amplifier/speaker coloration (out of scope).
+### Why Not Crosstalk for Stereo "Glue"
+
+The intuition that crosstalk would "glue" the hard L-R-R-L panning is incorrect. Real Paula's electrical crosstalk is ~-46dB - inaudible by design.
+
+What actually made Amiga sound "spatial" was **air between speakers**. For headphone listening, the correct solution is **crossfeed** (see Future Work), not crosstalk.
 
 ### FIR Filter Variations
 
@@ -106,12 +128,33 @@ Conclusion: These effects either degraded quality or were inaudible. The "analog
 | 0.48 | 127 | 2.5 | Original - muddy transients |
 | 0.52 | 63 | 2.0 | Better HF, still smeared |
 | 0.65 | 15 | 1.5 | Too much aliasing |
-| None | - | - | **Best** - sharp, natural |
+| CIC | - | - | **Best** - natural rolloff |
 
-The FIR was solving a problem that didn't exist. Paula's sample rates are low enough that averaging suffices.
+The FIR cut useful Paula harmonics. CIC's gentle -3.9dB rolloff at Nyquist preserves them.
 
 ## Phase Linearity
 
-The punch enhancement is **phase-linear** - it only uses the current and previous sample. No IIR filtering in the signal path means no group delay variation with frequency. Bass transients remain tight.
+The punch enhancement uses only current and previous samples (first difference). This is **linear phase** - no group delay variation, no bass smearing.
 
-Compare to HPF approach which introduced audible "tilt" on kick drums due to phase shift in the 50-200Hz range.
+Compare to HPF approach which introduced audible phase shift in the 50-200Hz range.
+
+## Future Work
+
+### Crossfeed (Headphone Mode)
+
+For headphone listening, hard L-R-R-L panning is fatiguing. The solution is crossfeed:
+- Opposite channel with ~300µs delay (ITD)
+- Lowpass ~700Hz (head shadow)
+- Level ~-5dB
+
+This simulates how Amiga sounded in a room with speakers. Classic implementations: bs2b, Meier crossfeed.
+
+### Punch Improvements
+
+1. Lowpass the diff signal at ~10-12kHz before adding - focuses energy in presence zone (2-8kHz) instead of boosting noise/sizzle
+2. Longer release (~45ms) with noise gate - more selective transient detection
+3. Soft clamp on transient component - prevent spikes on extreme transitions
+
+### Hardware Validation
+
+Record line-out from real A1200, loudness-match, blind A/B. This is the only way to know if punch exceeds real hardware character.
