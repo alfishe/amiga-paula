@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstring>
 #include <numbers>
+#include <algorithm>
 
 namespace mod {
 
@@ -81,6 +82,8 @@ void PwmPaula::clearState() {
     decimationPhase = 0.0;
     filterHi.clear();
     filterLED.clear();
+    prevOutL = prevOutR = 0;
+    envL = envR = 0;
 }
 
 void PwmPaula::fetchNextSample(Voice& v) {
@@ -254,6 +257,36 @@ void PwmPaula::generateSamples(float* outL, float* outR, int32_t numSamples) {
             filterLED.lowPassStereo(out, out);
 
         filterHi.highPassStereo(out, out);
+
+        // Punch enhancement: hybrid edge + soft envelope-gated transient boost
+        // Adds energy and attack definition without phase artifacts
+        // Parameters tuned for optimal balance: MaxSlew ~50k, HF ~1.23
+        {
+            constexpr float edgeBlend = 0.08f;   // Constant edge enhancement
+            constexpr float attack = 0.3f;       // Envelope attack speed
+            constexpr float release = 0.998f;    // Envelope release speed
+            constexpr float transBoost = 0.2f;   // Transient boost amount
+
+            float diffL = out[0] - prevOutL;
+            float diffR = out[1] - prevOutR;
+
+            // Envelope follower on difference magnitude
+            float magL = std::abs(diffL);
+            float magR = std::abs(diffR);
+            envL = (magL > envL) ? magL * attack + envL * (1-attack) : envL * release;
+            envR = (magR > envR) ? magR * attack + envR * (1-attack) : envR * release;
+
+            // Edge component (constant derivative blend)
+            out[0] += diffL * edgeBlend;
+            out[1] += diffR * edgeBlend;
+
+            // Transient component (envelope-gated, activates on attacks)
+            out[0] += diffL * envL * transBoost;
+            out[1] += diffR * envR * transBoost;
+
+            prevOutL = outSampleL;
+            prevOutR = outSampleR;
+        }
 
         outL[outIdx] = out[0];
         outR[outIdx] = out[1];

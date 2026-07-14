@@ -74,6 +74,10 @@ private:
 
     OnePoleFilter filterHi;
     TwoPoleFilter filterLED;
+
+    // Punch enhancement state
+    float prevOutL = 0, prevOutR = 0;
+    float envL = 0, envR = 0;
 };
 
 } // namespace mod
