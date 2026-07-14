@@ -53,7 +53,11 @@ jobs:
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
-        run: 7z a modplayer-${{ matrix.name }}.zip build\Release\modplayer.exe SDL2-2.30.3\lib\x64\SDL2.dll
+        run: |
+          mkdir pkg
+          copy build\Release\modplayer.exe pkg\
+          copy SDL2-2.30.3\lib\x64\SDL2.dll pkg\
+          cd pkg && 7z a ..\modplayer-${{ matrix.name }}.zip *
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
