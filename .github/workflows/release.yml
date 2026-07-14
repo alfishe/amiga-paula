@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL2 (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
+      - name: Install SDL2 (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install sdl2
+
+      - name: Install SDL2 (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          curl -L -o sdl2.zip https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-devel-2.30.3-VC.zip
+          7z x sdl2.zip
+          echo "SDL2_DIR=${{ github.workspace }}/SDL2-2.30.3/cmake" >> $env:GITHUB_ENV
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Package (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          cp build/modplayer dist/
+          tar -czvf modplayer-${{ matrix.name }}.tar.gz -C dist .
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir dist
+          copy build\Release\modplayer.exe dist\
+          copy SDL2-2.30.3\lib\x64\SDL2.dll dist\
+          7z a modplayer-${{ matrix.name }}.zip dist\*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: modplayer-${{ matrix.name }}
+          path: modplayer-${{ matrix.name }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            modplayer-linux/modplayer-linux.tar.gz
+            modplayer-windows/modplayer-windows.zip
+            modplayer-macos/modplayer-macos.tar.gz
