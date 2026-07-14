@@ -1,4 +1,5 @@
 #include "winuae_paula.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <numbers>
