@@ -92,7 +92,7 @@ void printUsage(const char* progName) {
     std::cout << "\nConsole MOD player with Amiga emulation\n";
     std::cout << "\nRenderers:\n";
     std::cout << "  BLEP   - Band-limited step synthesis (fast, accurate)\n";
-    std::cout << "  PWM    - PWM clock simulation ~3.55MHz + FIR decimation (authentic)\n";
+    std::cout << "  PWM    - DMA clock simulation ~3.55MHz with punch enhancement\n";
     std::cout << "  WinUAE - Lankila's sinc interpolation + filter model (WinUAE/UADE)\n";
     std::cout << "\nControls:\n";
     std::cout << "  Left/Right arrow - Switch renderer\n";
@@ -173,7 +173,7 @@ int main(int argc, char* argv[]) {
 
         const char* desc[] = {
             "BLEP (band-limited synthesis)",
-            "PWM (3.55MHz + FIR decimation)",
+            "PWM (3.55MHz DMA + punch)",
             "WinUAE (Lankila sinc + filter model)"
         };
         std::cout << "\n>>> " << desc[newIdx] << " <<<\n";
