@@ -15,7 +15,7 @@ jobs:
           - os: windows-latest
             name: windows
           - os: macos-latest
-            name: macos
+            name: macos-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -43,11 +43,19 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Package (Linux/macOS)
-        if: matrix.os != 'windows-latest'
+      - name: Package (Linux)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           mkdir -p dist
           cp build/modplayer dist/
+          tar -czvf modplayer-${{ matrix.name }}.tar.gz -C dist .
+
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          mkdir -p dist
+          cp build/modplayer dist/
+          cp scripts/macos-codesign.sh dist/
           tar -czvf modplayer-${{ matrix.name }}.tar.gz -C dist .
 
       - name: Package (Windows)
@@ -80,4 +88,4 @@ jobs:
           files: |
             modplayer-linux/modplayer-linux.tar.gz
             modplayer-windows/modplayer-windows.zip
-            modplayer-macos/modplayer-macos.tar.gz
+            modplayer-macos-arm64/modplayer-macos-arm64.tar.gz
