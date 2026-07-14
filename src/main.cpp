@@ -36,6 +36,8 @@ int readKey() {
             ch = _getch();
             if (ch == 75) return -1;  // Left arrow
             if (ch == 77) return -2;  // Right arrow
+            if (ch == 72) return -3;  // Up arrow
+            if (ch == 80) return -4;  // Down arrow
         }
         return ch;
     }
@@ -73,6 +75,8 @@ int readKey() {
                 if (read(STDIN_FILENO, &seq[1], 1) == 1) {
                     if (seq[1] == 'D') return -1;  // Left arrow
                     if (seq[1] == 'C') return -2;  // Right arrow
+                    if (seq[1] == 'A') return -3;  // Up arrow
+                    if (seq[1] == 'B') return -4;  // Down arrow
                 }
             }
             return 27;  // ESC
@@ -96,6 +100,7 @@ void printUsage(const char* progName) {
     std::cout << "  WinUAE - Lankila's sinc interpolation + filter model (WinUAE/UADE)\n";
     std::cout << "\nControls:\n";
     std::cout << "  Left/Right arrow - Switch renderer\n";
+    std::cout << "  Up/Down arrow    - Cycle PWM mode (Clean/Crossfeed)\n";
     std::cout << "  Q or Ctrl+C      - Quit\n";
 }
 
@@ -179,6 +184,12 @@ int main(int argc, char* argv[]) {
         std::cout << "\n>>> " << desc[newIdx] << " <<<\n";
     };
 
+    auto cyclePwmMode = [&](int delta) {
+        if (currentIdx != 1) return;  // PWM only
+        pwmPaula.cycleMode(delta);
+        std::cout << "\n>>> PWM: " << mod::PwmPaula::modeName(pwmPaula.getMode()) << " <<<\n";
+    };
+
     while (running && replayer.isPlaying()) {
         int key = readKey();
         if (key == 'q' || key == 'Q' || key == 27) {
@@ -187,9 +198,14 @@ int main(int argc, char* argv[]) {
             switchRenderer((currentIdx - 1 + NUM_RENDERERS) % NUM_RENDERERS);
         } else if (key == -2) {  // Right arrow
             switchRenderer((currentIdx + 1) % NUM_RENDERERS);
+        } else if (key == -3) {  // Up arrow
+            cyclePwmMode(-1);
+        } else if (key == -4) {  // Down arrow
+            cyclePwmMode(1);
         }
 
-        std::cout << "\r[" << rendererNames[static_cast<int>(currentType)] << "] "
+        std::string modeStatus = (currentIdx == 1) ? std::string(" [") + mod::PwmPaula::modeName(pwmPaula.getMode()) + "]" : "";
+        std::cout << "\r[" << rendererNames[static_cast<int>(currentType)] << "]" << std::setw(12) << std::left << modeStatus << " "
                   << "Pos: " << std::setw(3) << replayer.getPosition()
                   << "/" << std::setw(3) << (int)module->songLength
                   << " | Pat: " << std::setw(3) << replayer.getPattern()

@@ -78,6 +78,36 @@ private:
     // Punch enhancement state
     float prevOutL = 0, prevOutR = 0;
     float envL = 0, envR = 0;
+
+    // Spatial enhancement state
+    static constexpr int MAX_DELAY = 1024;  // ~21ms @ 48kHz
+    std::array<float, MAX_DELAY> delayL{}, delayR{};
+    int delayIdx = 0;
+
+    // Spatial filter state
+    float spatialLpL = 0, spatialLpR = 0;
+
+public:
+    enum class Mode {
+        Clean = 0,
+        Room_15dB,
+        Room_14dB,
+        Room_13dB,
+        Room_12dB,
+        Room_9dB,
+        COUNT
+    };
+    void setMode(Mode m);
+    Mode getMode() const { return currentMode; }
+    void cycleMode(int delta);
+    static const char* modeName(Mode m);
+
+private:
+    Mode currentMode = Mode::Clean;
+    bool spatialEnabled = false;
+    float spatialLevel = 0.0f;
+    float spatialLpCoef = 0.0f;
+    int spatialDelay = 0;
 };
 
 } // namespace mod

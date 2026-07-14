@@ -7,7 +7,7 @@ The PWM renderer simulates Paula's audio subsystem at the native DMA clock rate 
 ## Signal Chain
 
 ```
-Paula DMA @ 3.55MHz → Per-channel PWM volume → Stereo sum → CIC decimation → Analog filters → Punch enhancement → Output
+Paula DMA @ 3.55MHz → Per-channel PWM volume → Stereo sum → CIC decimation → Analog filters → Punch enhancement → Room simulation (optional) → Output
 ```
 
 ## Decimation Strategy
@@ -140,14 +140,38 @@ Compare to HPF approach which introduced audible phase shift in the 50-200Hz ran
 
 ## Future Work
 
-### Crossfeed (Headphone Mode)
+### Room Simulation (Implemented)
 
-For headphone listening, hard L-R-R-L panning is fatiguing. The solution is crossfeed:
-- Opposite channel with ~300µs delay (ITD)
-- Lowpass ~700Hz (head shadow)
-- Level ~-5dB
+For headphone listening, hard L-R-R-L panning is fatiguing. Traditional crossfeed (bs2b, Meier) uses ~600Hz lowpass to simulate head shadow, but this removes high-frequency clarity.
 
-This simulates how Amiga sounded in a room with speakers. Classic implementations: bs2b, Meier crossfeed.
+The current implementation uses **room simulation** instead:
+- 3ms delay (early reflection timing, not ITD)
+- ~10kHz lowpass (air absorption, not head shadow)
+- Levels from -15dB to -9dB
+
+This preserves crystal clarity while reducing stereo fatigue.
+
+| Mode | Linear | dB | Recommendation |
+|------|--------|-----|----------------|
+| Room -15dB | 0.178 | -15 | Subtle, safe for all material |
+| Room -14dB | 0.20 | -14 | **Recommended** for most music |
+| Room -13dB | 0.224 | -13 | Light, good for slower tracks |
+| Room -12dB | 0.25 | -12 | Moderate, may color transients |
+| Room -9dB | 0.35 | -9 | Strong, for ambient/pad-heavy music |
+
+### Why Higher Levels Sound "Too Much"
+
+The 3ms delay creates comb filtering with notches at 167 Hz, 500 Hz, 833 Hz, etc. At -12dB and above, these notches become audible as:
+- Subtle "double hit" on transients (kicks, hats)
+- Smearing on fast-changing material (techno, breakbeats)
+
+On transient-heavy music, stick to -14dB or -15dB. The higher levels exist for ambient, chiptune, or slower tracker music where spatial width matters more than transient precision.
+
+### Rejected Spatial Approaches
+
+1. **Traditional crossfeed** (0.3ms ITD, 600Hz LP) - removed clarity immediately, even at -1dB
+2. **Tilt filter crossfeed** (-4dB/oct shelf) - still colored the sound noticeably
+3. **Early reflections** (discrete wall taps) - added complexity without improvement over simple room
 
 ### Punch Improvements
 

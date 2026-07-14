@@ -22,9 +22,26 @@ Filter chain: configurable A500 or A1200 model with RC high-pass (~5.3 Hz), opti
 
 This renderer operates at Paula's native DMA clock rate of approximately 3.546895 MHz (PAL), simulating the pulse-width modulation mechanism used for volume control on the original hardware.
 
-Paula implements volume attenuation through PWM at the color clock rate rather than through analog multiplication. This creates subtle intermodulation products and timing artifacts that contribute to the characteristic Amiga sound. The renderer captures sample values at full clock resolution, then decimates to the output sample rate using a polyphase FIR filter.
+Paula implements volume attenuation through PWM at the color clock rate rather than through analog multiplication. This creates subtle intermodulation products and timing artifacts that contribute to the characteristic Amiga sound. The renderer captures sample values at full clock resolution, then decimates to the output sample rate using CIC (boxcar) averaging.
 
-The decimation filter uses a Kaiser-windowed design with cutoff near the output Nyquist frequency. The ~74:1 decimation factor (3.55 MHz to 48 kHz) requires careful attention to passband flatness and stopband rejection to avoid audible coloration.
+The CIC decimation provides natural anti-aliasing with approximately -3.9 dB rolloff at Nyquist, preserving Paula's useful harmonics without the transient smearing that FIR filters introduce.
+
+**Punch Enhancement**: A hybrid edge boost and envelope-gated transient enhancer adds attack definition and harmonic richness. This is sound design, not emulation—it makes the output punchier than stock Paula.
+
+**Room Simulation** (Up/Down arrows when PWM selected): For headphone listening, optional room simulation reduces stereo fatigue from Amiga's hard L-R-R-L panning:
+
+| Mode | Level | Description |
+|------|-------|-------------|
+| Clean | — | No spatial processing |
+| Room -15dB | -15dB | Subtle, safe for all material |
+| Room -14dB | -14dB | **Recommended** for most music |
+| Room -13dB | -13dB | Light, good for slower tracks |
+| Room -12dB | -12dB | Moderate, may color transients |
+| Room -9dB | -9dB | Strong, for ambient/pad-heavy music |
+
+Room simulation uses 3ms delayed opposite-channel bleed with gentle 10kHz lowpass (simulating air absorption, not head shadow). This preserves high-frequency clarity unlike traditional crossfeed which uses aggressive lowpass around 600Hz.
+
+**Note:** On transient-heavy music (techno, breakbeats), stick to -14dB or -15dB. Higher levels can cause audible comb filtering artifacts on fast attacks.
 
 ### WinUAE (Lankila Sinc Interpolation)
 
@@ -79,6 +96,7 @@ make
 
 Controls:
 - Left/Right arrows: cycle through renderers
+- Up/Down arrows: cycle PWM room simulation modes
 - Q or Escape: quit
 
 The current renderer is displayed in the status line during playback.

@@ -6,6 +6,66 @@
 
 namespace mod {
 
+const char* PwmPaula::modeName(Mode m) {
+    switch (m) {
+        case Mode::Clean:     return "Clean";
+        case Mode::Room_15dB: return "Room -15dB";
+        case Mode::Room_14dB: return "Room -14dB";
+        case Mode::Room_13dB: return "Room -13dB";
+        case Mode::Room_12dB: return "Room -12dB";
+        case Mode::Room_9dB:  return "Room -9dB";
+        default: return "?";
+    }
+}
+
+void PwmPaula::setMode(Mode m) {
+    currentMode = m;
+    // Room modes: 3ms delay, gentle HF rolloff (~10kHz), preserves clarity
+    switch (m) {
+        case Mode::Clean:
+            spatialEnabled = false;
+            break;
+        case Mode::Room_15dB:
+            spatialEnabled = true;
+            spatialLevel = 0.178f;    // -15dB
+            spatialDelay = 144;       // 3ms @ 48kHz
+            spatialLpCoef = 0.7f;     // ~10kHz
+            break;
+        case Mode::Room_14dB:
+            spatialEnabled = true;
+            spatialLevel = 0.20f;     // -14dB
+            spatialDelay = 144;
+            spatialLpCoef = 0.7f;
+            break;
+        case Mode::Room_13dB:
+            spatialEnabled = true;
+            spatialLevel = 0.224f;    // -13dB
+            spatialDelay = 144;
+            spatialLpCoef = 0.7f;
+            break;
+        case Mode::Room_12dB:
+            spatialEnabled = true;
+            spatialLevel = 0.25f;     // -12dB
+            spatialDelay = 144;
+            spatialLpCoef = 0.7f;
+            break;
+        case Mode::Room_9dB:
+            spatialEnabled = true;
+            spatialLevel = 0.35f;     // -9dB
+            spatialDelay = 144;
+            spatialLpCoef = 0.7f;
+            break;
+        default: break;
+    }
+}
+
+void PwmPaula::cycleMode(int delta) {
+    int m = static_cast<int>(currentMode) + delta;
+    int count = static_cast<int>(Mode::COUNT);
+    m = (m % count + count) % count;
+    setMode(static_cast<Mode>(m));
+}
+
 void PwmPaula::setup(double freq) {
     outputFreq = freq;
     clearState();
@@ -84,6 +144,10 @@ void PwmPaula::clearState() {
     filterLED.clear();
     prevOutL = prevOutR = 0;
     envL = envR = 0;
+    delayL.fill(0);
+    delayR.fill(0);
+    delayIdx = 0;
+    spatialLpL = spatialLpR = 0;
 }
 
 void PwmPaula::fetchNextSample(Voice& v) {
@@ -286,6 +350,28 @@ void PwmPaula::generateSamples(float* outL, float* outR, int32_t numSamples) {
 
             prevOutL = outSampleL;
             prevOutR = outSampleR;
+        }
+
+        // Room simulation: delayed opposite channel with gentle LP
+        if (spatialEnabled) {
+            // Store current samples in delay line
+            delayL[delayIdx] = out[0];
+            delayR[delayIdx] = out[1];
+
+            // Get delayed opposite channel
+            int delayedIdx = (delayIdx - spatialDelay + MAX_DELAY) % MAX_DELAY;
+            float delayedL = delayR[delayedIdx];  // R->L
+            float delayedR = delayL[delayedIdx];  // L->R
+
+            // Gentle lowpass (~10kHz - air absorption, not head shadow)
+            spatialLpL += spatialLpCoef * (delayedL - spatialLpL);
+            spatialLpR += spatialLpCoef * (delayedR - spatialLpR);
+
+            // Mix
+            out[0] += spatialLpL * spatialLevel;
+            out[1] += spatialLpR * spatialLevel;
+
+            delayIdx = (delayIdx + 1) % MAX_DELAY;
         }
 
         outL[outIdx] = out[0];
